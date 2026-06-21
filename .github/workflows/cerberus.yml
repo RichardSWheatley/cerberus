@@ -1,0 +1,208 @@
+name: CERBERUS
+
+on:
+  pull_request:
+    paths:
+      - '**.c'
+      - '**.h'
+  schedule:
+    # Biweekly KB update — every other Monday at 06:00 UTC
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'pr'
+        type: choice
+        options:
+          - pr
+          - kb-update
+          - full
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  UNITY_PATH: ${{ github.workspace }}/unity
+
+jobs:
+  # ── Fast gate: deterministic scan only (no API calls) ──────────
+  scan:
+    name: Deterministic Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      has_critical: ${{ steps.scan.outputs.has_critical }}
+      changed_files: ${{ steps.files.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Get changed C files
+        id: files
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.c' '*.h' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "Changed files: $FILES"
+
+      - name: Run deterministic scan
+        id: scan
+        run: |
+          python -m cerberus.cli scan ${{ steps.files.outputs.files }} \
+            --output-dir scan_output
+          echo "has_critical=false" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Check for critical findings
+        if: steps.scan.outcome == 'failure'
+        run: echo "has_critical=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-results
+          path: scan_output/
+
+  # ── Full analysis: AI + Unity tests ────────────────────────────
+  analyze:
+    name: AI Analysis + Unity Tests
+    runs-on: ubuntu-latest
+    needs: scan
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install anthropic
+          sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Setup Unity test framework
+        run: |
+          if [ ! -d "unity" ]; then
+            git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git unity
+          fi
+
+      - name: Restore knowledge base
+        uses: actions/cache@v4
+        with:
+          path: .cerberus-kb*
+          key: cerberus-kb-${{ github.run_id }}
+          restore-keys: cerberus-kb-
+
+      - name: Run full analysis pipeline
+        run: |
+          python -m cerberus.cli pr \
+            --unity-dir unity/src \
+            --output-dir analysis_output \
+            --test-dir test_output
+        continue-on-error: true
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const glob = require('glob');
+            const files = fs.readdirSync('analysis_output')
+              .filter(f => f.endsWith('_pr_comment.md'));
+
+            let body = '';
+            for (const f of files) {
+              body += fs.readFileSync(`analysis_output/${f}`, 'utf8') + '\n\n';
+            }
+
+            if (body.trim()) {
+              // Find existing comment to update
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              const existing = comments.find(c =>
+                c.user.type === 'Bot' && c.body.includes('CERBERUS')
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body: body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body,
+                });
+              }
+            }
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: analysis_output/
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-results
+          path: |
+            analysis_output/
+            test_output/
+
+  # ── Biweekly KB update (cron or manual) ────────────────────────
+  kb-update:
+    name: Knowledge Base Update
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'kb-update')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Restore previous KB
+        uses: actions/cache@v4
+        with:
+          path: .cerberus-kb*
+          key: cerberus-kb-${{ github.run_id }}
+          restore-keys: cerberus-kb-
+
+      - name: Update knowledge base
+        run: python -m cerberus.cli kb-update
+
+      - name: Save updated KB
+        uses: actions/cache/save@v4
+        with:
+          path: .cerberus-kb*
+          key: cerberus-kb-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-base
+          path: .cerberus-kb*
