@@ -1,5 +1,5 @@
 """
-AI deep analysis engine — Claude API for contextual code analysis.
+AI deep analysis engine — provider-agnostic LLM for contextual code analysis.
 
 Runs AFTER the deterministic scanner. Receives the scanner's findings so it can
 focus on deeper issues: cross-function data flow, logic errors, RTOS-specific
@@ -69,7 +69,7 @@ def run_ai_analysis(
     kb_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Run Claude-powered deep analysis on C source code.
+    Run LLM-powered deep analysis on C source code.
 
     Args:
         source: The C source code
@@ -80,18 +80,7 @@ def run_ai_analysis(
     Returns:
         Parsed JSON result from the AI analysis
     """
-    try:
-        import anthropic
-    except ImportError:
-        print("ERROR: anthropic package not installed. Run: pip install anthropic", file=sys.stderr)
-        sys.exit(1)
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY environment variable not set.", file=sys.stderr)
-        sys.exit(1)
-
-    client = anthropic.Anthropic(api_key=api_key)
+    from cerberus import llm
 
     scanner_summary = json.dumps(scanner_findings, indent=2) if scanner_findings else "No scanner findings."
 
@@ -107,13 +96,16 @@ Source code:
 {source}
 ```"""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        system=ANALYSIS_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
-    )
+    try:
+        text = llm.complete(
+            system=ANALYSIS_SYSTEM_PROMPT,
+            user=user_content,
+            max_tokens=4096,
+            json_mode=True,
+        )
+    except llm.LLMError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    text = "".join(block.text for block in message.content if hasattr(block, "text"))
     clean = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(clean)

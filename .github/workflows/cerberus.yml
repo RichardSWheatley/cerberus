@@ -26,7 +26,9 @@ permissions:
   security-events: write
 
 env:
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  CERBERUS_LLM_PROVIDER: ${{ vars.CERBERUS_LLM_PROVIDER || 'anthropic' }}
+  CERBERUS_LLM_API_KEY: ${{ secrets.CERBERUS_LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
+  CERBERUS_LLM_MODEL: ${{ vars.CERBERUS_LLM_MODEL }}
   UNITY_PATH: ${{ github.workspace }}/unity
 
 jobs:
@@ -89,7 +91,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install anthropic
+          pip install anthropic   # swap for openai/google-generativeai per CERBERUS_LLM_PROVIDER
           sudo apt-get update && sudo apt-get install -y gcc
 
       - name: Setup Unity test framework
@@ -184,7 +186,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install anthropic
+        run: pip install anthropic   # swap per CERBERUS_LLM_PROVIDER
 
       - name: Restore previous KB
         uses: actions/cache@v4

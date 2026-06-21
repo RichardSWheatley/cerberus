@@ -92,31 +92,27 @@ def update_kb(kb_dir: Optional[Path] = None) -> Dict[str, Any]:
     """
     Run the biweekly knowledge base update.
 
-    Uses Claude with web search to fetch real advisories from tracked sources.
+    Uses the configured LLM provider (with web search if supported) to fetch
+    advisories from tracked sources.
 
     Returns:
         Dict with 'success', 'sources_updated', 'items_count'
     """
+    from cerberus import llm
+
+    use_search = llm.provider_supports_web_search()
+
     try:
-        import anthropic
-    except ImportError:
-        return {"success": False, "error": "anthropic package not installed"}
+        text = llm.complete(
+            system=KB_UPDATE_PROMPT,
+            user="Check all sources and return the latest updates as of today.",
+            max_tokens=4096,
+            web_search=use_search,
+            json_mode=True,
+        )
+    except llm.LLMError as e:
+        return {"success": False, "error": str(e)}
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"success": False, "error": "ANTHROPIC_API_KEY not set"}
-
-    client = anthropic.Anthropic(api_key=api_key)
-
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        system=KB_UPDATE_PROMPT,
-        messages=[{"role": "user", "content": "Check all sources and return the latest updates as of today."}],
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-    )
-
-    text = "".join(block.text for block in message.content if hasattr(block, "text"))
     clean = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
     try:

@@ -30,10 +30,10 @@ PR opened / push
         │
         ▼
 ┌──────────────────────┐
-│  HEAD 2               │  AI deep analysis via Claude. Cross-function data
+│  HEAD 2               │  AI deep analysis (any LLM). Cross-function data
 │  The Oracle           │  flow, taint propagation, the undecidable MISRA/CERT
 │                       │  rules (use-after-free, null-deref, wraparound),
-│  (Claude Sonnet)      │  complexity, RTOS hazards. Informed by Knowledge Base.
+│  (pluggable LLM)      │  complexity, RTOS hazards. Informed by Knowledge Base.
 └───────┬──────────────┘
         │
         ▼
@@ -95,8 +95,15 @@ python -m cerberus.cli kb-check
 ## Setup
 
 ```bash
-pip install anthropic              # Head 2/3 only; Head 1 is pure stdlib
-export ANTHROPIC_API_KEY="sk-ant-..."
+# Head 2/3 only; Head 1 is pure stdlib. Install the SDK for your chosen provider:
+pip install anthropic              # default provider
+# pip install openai               # for OpenAI or local (Ollama/vLLM/LM Studio)
+# pip install google-generativeai  # for Google Gemini
+
+# Pick a provider (default: anthropic) and supply its key:
+export CERBERUS_LLM_PROVIDER="anthropic"     # anthropic | openai | google | openai_compatible
+export CERBERUS_LLM_API_KEY="..."            # or the provider-native var (ANTHROPIC_API_KEY, etc.)
+
 bash setup_unity.sh                # clones ThrowTheSwitch/Unity for Head 3
 
 python -m cerberus.cli scan yourfile.c                       # free mode
@@ -120,6 +127,39 @@ See **INSTALL.md** for the full walkthrough.
 | Knowledge base updates | Yes |
 
 `scan` mode runs free, forever. `analyze` adds the AI heads and test proof.
+
+---
+
+## LLM Providers
+
+The AI heads are provider-agnostic. Choose via environment variable:
+
+| Provider | `CERBERUS_LLM_PROVIDER` | SDK | Web search | Notes |
+|----------|------------------------|-----|------------|-------|
+| Anthropic | `anthropic` (default) | `anthropic` | Yes | Native web search for KB updates |
+| OpenAI | `openai` | `openai` | No | |
+| Google Gemini | `google` | `google-generativeai` | No | |
+| Local / self-hosted | `openai_compatible` | `openai` | No | Ollama, vLLM, LM Studio — set `CERBERUS_LLM_BASE_URL` |
+
+```bash
+# Anthropic (default)
+export CERBERUS_LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export CERBERUS_LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+export CERBERUS_LLM_MODEL=gpt-4o          # optional override
+
+# Local model via Ollama (no key, no data leaves your machine)
+export CERBERUS_LLM_PROVIDER=openai_compatible
+export CERBERUS_LLM_BASE_URL=http://localhost:11434/v1
+export CERBERUS_LLM_MODEL=llama3.1:8b
+```
+
+Providers without a native web-search tool run the knowledge-base updater
+without live search and flag the result as less current. Everything else works
+identically across providers.
 
 ---
 
@@ -181,7 +221,8 @@ cerberus/
 ├── scanner.py       Head 1 — 94 deterministic pattern checks
 ├── misra.py         MISRA C:2012 + CERT C traceable rule catalog
 ├── intent.py        Intent layer — name/comment/contract mismatch detection
-├── ai_engine.py     Head 2 — Claude deep analysis
+├── llm.py          Vendor-agnostic LLM provider abstraction
+├── ai_engine.py     Head 2 — AI deep analysis (provider-agnostic)
 ├── test_gen.py      Head 3 — Unity test generation
 ├── test_runner.py   Head 3 — compile + execute + parse results
 ├── convergence.py   Iterative consensus loop across all heads

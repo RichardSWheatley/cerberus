@@ -83,18 +83,7 @@ def generate_unity_tests(
     Returns:
         The generated test file content
     """
-    try:
-        import anthropic
-    except ImportError:
-        print("ERROR: anthropic package not installed. Run: pip install anthropic", file=sys.stderr)
-        sys.exit(1)
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY environment variable not set.", file=sys.stderr)
-        sys.exit(1)
-
-    client = anthropic.Anthropic(api_key=api_key)
+    from cerberus import llm
 
     findings_json = json.dumps(all_findings, indent=2)
 
@@ -108,14 +97,16 @@ Source code:
 {source}
 ```"""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=8192,
-        system=UNITY_TEST_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
-    )
+    try:
+        test_code = llm.complete(
+            system=UNITY_TEST_SYSTEM_PROMPT,
+            user=user_content,
+            max_tokens=8192,
+        )
+    except llm.LLMError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    test_code = "".join(block.text for block in message.content if hasattr(block, "text"))
     test_code = test_code.strip().removeprefix("```c").removeprefix("```").removesuffix("```").strip()
 
     if output_path:

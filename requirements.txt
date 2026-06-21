@@ -1,1 +1,7 @@
-anthropic>=0.40.0
+# CERBERUS G.U.A.R.D. — LLM provider SDKs (install only what you use)
+# Head 1 (scanner + MISRA/CERT) needs none of these.
+#
+# Choose your provider via CERBERUS_LLM_PROVIDER, then install its SDK:
+anthropic>=0.40.0          # CERBERUS_LLM_PROVIDER=anthropic (default)
+# openai>=1.0.0            # CERBERUS_LLM_PROVIDER=openai  OR  openai_compatible (local Ollama/vLLM/LM Studio)
+# google-generativeai>=0.8.0  # CERBERUS_LLM_PROVIDER=google

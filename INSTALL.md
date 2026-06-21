@@ -4,7 +4,7 @@
 
 A three-headed C static analysis pipeline:
 - **Head 1** — deterministic pattern scanner (94 checks) + MISRA C:2012 / CERT C catalog
-- **Head 2** — AI deep analysis (Claude) for undecidable / dataflow rules
+- **Head 2** — AI deep analysis (any LLM provider) for undecidable / dataflow rules
 - **Head 3** — Unity test generation + execution (proof the bug is reachable)
 - **Intent layer** — does the code do what its names/comments/contracts promise?
 - **Convergence loop** — iterates all heads until they reach consensus
@@ -15,7 +15,7 @@ A three-headed C static analysis pipeline:
 
 - Python 3.9+
 - `gcc` (for Head 3 Unity test compilation)
-- An Anthropic API key (for Head 2 and Head 3 AI analysis — Head 1 needs none)
+- An API key for your chosen LLM provider (Head 2/3 only — Head 1 needs none)
 - `git` (to clone Unity framework)
 
 ---
@@ -27,10 +27,11 @@ A three-headed C static analysis pipeline:
 cd cerberus
 
 # Python dependency (only needed for Head 2/3 — Head 1 is pure stdlib)
-pip install anthropic        # or: pip install -r requirements.txt
+pip install anthropic        # or openai / google-generativeai for other providers
 
 # Set your API key (Head 2/3 only)
-export ANTHROPIC_API_KEY="sk-ant-..."
+export CERBERUS_LLM_PROVIDER="anthropic"   # anthropic | openai | google | openai_compatible
+export CERBERUS_LLM_API_KEY="..."          # or provider-native var (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...)
 
 # Install the Unity test framework (Head 3 only)
 bash setup_unity.sh          # clones ThrowTheSwitch/Unity into ./unity
@@ -94,7 +95,7 @@ Every finding is tagged with its rule ID (`MISRA R.15.6`, `CERT INT34-C`,
 Copy `.github/workflows/cerberus.yml` into your repo, then:
 
 1. Go to **Settings → Secrets and variables → Actions**
-2. Add a secret named `ANTHROPIC_API_KEY` with your key
+2. Add a secret named `CERBERUS_LLM_API_KEY` (and set `CERBERUS_LLM_PROVIDER` if not Anthropic)
 3. Commit the workflow
 
 The workflow runs:
@@ -111,7 +112,8 @@ cerberus/
 ├── scanner.py       Head 1 — 94 deterministic pattern checks
 ├── misra.py         MISRA C:2012 + CERT C traceable rule catalog
 ├── intent.py        Intent layer — name/comment/contract mismatch detection
-├── ai_engine.py     Head 2 — Claude deep analysis
+├── llm.py          Vendor-agnostic LLM provider abstraction
+├── ai_engine.py     Head 2 — AI deep analysis
 ├── test_gen.py      Head 3 — Unity test generation
 ├── test_runner.py   Head 3 — compile + execute + parse results
 ├── convergence.py   Iterative consensus loop across all heads
@@ -129,7 +131,7 @@ cerberus/
 | Head 1 pattern scanner (94 checks) | No |
 | MISRA C:2012 / CERT C decidable rules | No |
 | Intent layer (most checks) | No |
-| Head 2 AI deep analysis | Yes |
+| Head 2 AI deep analysis | Yes (any provider) |
 | Head 3 Unity test generation | Yes |
 | Convergence loop (full) | Yes |
 | Knowledge base updates | Yes |

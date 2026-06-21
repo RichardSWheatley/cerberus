@@ -4,7 +4,7 @@ CERBERUS — CI Pipeline Entry Point
 
 Full pipeline:
   1. Deterministic pattern scan (instant, guaranteed)
-  2. AI deep analysis via Claude (contextual, cross-function)
+  2. AI deep analysis via configured LLM (contextual, cross-function)
   3. Unity test generation targeting all findings
   4. Compile and run Unity tests
   5. Generate PR comment / annotations / SARIF
