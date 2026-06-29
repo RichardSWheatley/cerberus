@@ -471,10 +471,9 @@ PATTERNS: List[Dict[str, Any]] = [
     {
         "id": "INT-SHIFT-OVERWIDTH",
         # Flag shifts of >= 128 bits (UB on all types including uint128_t).
-        # Shifts of 64-127 bits are valid on uint128_t/__uint128_t — suppress when a 128-bit
-        # type appears on the same line (NuttX crypto/ecc.c uses uint128_t >> 64 extensively).
-        # Shifts of >= 128 are UB on everything and are not suppressed.
-        "regex": r'(?:<<|>>)\s*(?:1[2-9]\d|[2-9]\d{2,}|\d{4,})',
+        # `1[2-9]\d` previously matched 120-199, but 120-127 are valid on uint128_t (range 0-127).
+        # Fixed to only match 128+: `12[89]` (128-129), `1[3-9]\d` (130-199), `[2-9]\d{2}` (200-999).
+        "regex": r'(?:<<|>>)\s*(?:12[89]|1[3-9]\d|[2-9]\d{2}|\d{4,})',
         "category": "undefined_behavior", "severity": "critical",
         "title": "Shift by >= 128 bits",
         "cwe": "CWE-682", "cert_c": "INT34-C",
@@ -558,8 +557,11 @@ PATTERNS: List[Dict[str, Any]] = [
         #   `    }` alone on its own line — closing brace of the do-block on the line before
         # Use `^\s*\}\s*$` (line is only `}`) rather than `\}\s*$` (any line ending with `}`)
         # to avoid suppressing real empty-if cases on one-liner test strings.
+        # Also suppress `for(;;)` / `for( ; ; )` — the intentional infinite-halt pattern used
+        # in embedded startup/panic code (e.g. NuttX arm_systemreset.c, arm_poweroff.c).
         "lookbehind_fail": r'^\s*\}\s*$|\}\s*while\b',
         "lookbehind_lines": 1,
+        "skip_line_pattern": r'\bfor\s*\(\s*;\s*;\s*\)',
         "category": "bug", "severity": "high",
         "title": "Semicolon immediately after if/for/while",
         "cwe": "CWE-561", "cert_c": "EXP15-C", "misra": "R.15.6",
