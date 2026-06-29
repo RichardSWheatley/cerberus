@@ -362,7 +362,11 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "MEM-RETURN-STACK",
+        # Match `return &var;` but skip if `static` storage-class appears on a declaration of that
+        # variable anywhere in the file — static-storage variables outlive the function frame.
         "regex": r'return\s*&\s*(\w+)\s*;',
+        "lookbehind_fail": r'static\s+(?:\w+\s+)*{var}\b|static\s+const\s+(?:\w+\s+)*{var}\b',
+        "lookbehind_lines": 99999,
         "category": "memory", "severity": "critical",
         "title": "Returning address of stack-local variable",
         "cwe": "CWE-562", "cert_c": "DCL30-C",
@@ -474,7 +478,13 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "INT-DIV-ZERO",
-        "regex": r'[/%%]\s*(\w+)',
+        # Match / or % followed by an identifier, but NOT:
+        #   - sizeof(...) — compile-time constant, always > 0
+        #   - ALL_CAPS macro names — conventional compile-time constants in C
+        #   - paths inside #include <...> (the / is a path separator, not division)
+        #   - lines containing BUILD_ASSERT (compile-time assertion, never runtime division)
+        "regex": r'[/%%]\s*(?!sizeof\s*\()(?![A-Z][A-Z0-9_]*\b)(\w+)',
+        "skip_line_pattern": r'^\s*#\s*include|BUILD_ASSERT\s*\(',
         "lookbehind_fail": r'if\s*\(\s*{var}\s*[!=><]+\s*0|{var}\s*==\s*0',
         "lookbehind_lines": 3,
         "category": "bug", "severity": "medium",
@@ -599,8 +609,10 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "CONC-VOLATILE-MISSING",
-        "regex": r'(?:volatile\s+)?(?:static\s+)?(?:extern\s+)?(?:unsigned\s+|signed\s+)?(?:int|uint\d+_t|bool|char)\s+(\w+)\s*;',
-        "file_context": "shared_global",
+        # Restrict to declarations at file/global scope only (no leading whitespace).
+        # The previous regex matched any variable declaration including function locals because the
+        # "file_context": "shared_global" field was never read by the engine.
+        "regex": r'^(?:volatile\s+)?(?:static\s+)?(?:extern\s+)?(?:unsigned\s+|signed\s+)?(?:int|uint\d+_t|bool|char)\s+(\w+)\s*;',
         "category": "concurrency", "severity": "info",
         "title": "Global variable may need volatile or atomic qualifier",
         "cwe": "CWE-362", "cert_c": "CON02-C",
@@ -848,7 +860,10 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "STYLE-MISSING-CONST",
-        "regex": r'\b(?:char|uint8_t|int|void)\s*\*\s*(\w+)\s*[,=)]',
+        # Exclude pointers already qualified with `const` before the base type or between `*` and name.
+        # Negative lookbehind for `const ` before the type keyword, and negative lookahead for `const`
+        # between `*` and the identifier.
+        "regex": r'(?<!const\s)(?<!const )(?:char|uint8_t|int|void)\s*\*\s*(?!const\s)(\w+)\s*[,=)]',
         "category": "style", "severity": "info",
         "title": "Pointer parameter not const-qualified",
         "cwe": None, "cert_c": "DCL13-C", "misra": "R.8.13",
@@ -1118,7 +1133,10 @@ def scan_patterns(stripped: str, filepath: str = "", functions: List[dict] = Non
 
         # Standard line-by-line scan
         pattern = re.compile(rule["regex"], re.MULTILINE)
+        skip_prefix_re = re.compile(rule.get("skip_line_pattern") or rule.get("skip_line_prefix") or r'(?!)', re.MULTILINE) if (rule.get("skip_line_pattern") or rule.get("skip_line_prefix")) else None
         for i, line in enumerate(lines):
+            if skip_prefix_re and skip_prefix_re.search(line):
+                continue
             match = pattern.search(line)
             if not match:
                 continue
