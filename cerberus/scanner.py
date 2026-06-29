@@ -507,7 +507,9 @@ PATTERNS: List[Dict[str, Any]] = [
         # Shifts of 32-63 bits are UB only on 32-bit types. Flag them only when the line does
         # NOT contain a 64-bit type keyword, which would make the shift legal.
         "regex": r'(?:<<|>>)\s*(?:3[2-9]|[45]\d|6[0-3])',
-        "skip_line_pattern": r'\bu(?:int)?64_t\b|__u64\b|unsigned\s+long\s+long\b|long\s+long\b|u64\b|s64\b|__le64\b|__be64\b',
+        # Also suppress on 64-bit integer literal suffixes: `1ull << 63`, `0xFFULL >> 32`.
+        # `ull`/`ULL`/`llu`/`LLU` suffixes imply `unsigned long long` (64-bit on LP64/LLP64).
+        "skip_line_pattern": r'\bu(?:int)?64_t\b|__u64\b|unsigned\s+long\s+long\b|long\s+long\b|u64\b|s64\b|__le64\b|__be64\b|\dull\b|\dULL\b|\dllu\b|\dLLU\b|\du64\b|\bu128\b',
         "category": "undefined_behavior", "severity": "high",
         "title": "Shift by 32-63 bits on likely 32-bit operand",
         "cwe": "CWE-682", "cert_c": "INT34-C",
@@ -899,7 +901,12 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "MISRA-SIDE-EFFECT-ASSERT",
-        "regex": r'\bassert\s*\(\s*(?:.*\+\+|.*--|.*=(?!=)|.*\w+\s*\([^)]*\))',
+        # The `=(?!=)` alternative is meant to catch assignment inside assert.
+        # The negative lookbehind `(?<![<>!=+\\-*/%^|&])` excludes comparison and
+        # compound-assignment operators: `<=`, `>=`, `!=`, `+=`, `-=`, `*=`, etc.
+        # Without it, `.*` greedily consumes the operator char so `!=`/`<=`/`>=`
+        # all wrongly matched as "assignment".
+        "regex": r'\bassert\s*\(\s*(?:.*\+\+|.*--|.*(?<![<>!=+\-*/%^|&])=(?!=)|.*\w+\s*\([^)]*\))',
         "category": "bug", "severity": "high",
         "title": "Side effect in assert() expression",
         "cwe": "CWE-617", "cert_c": "EXP31-C", "misra": "R.21.9",
