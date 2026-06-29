@@ -1015,8 +1015,17 @@ def _strip_comments(source: str) -> str:
 
 
 def _strip_strings(source: str) -> str:
-    """Remove string literals to avoid false positives inside strings."""
-    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', source)
+    """Remove string and character literals to avoid false positives.
+
+    Must strip character literals FIRST: a char literal like '\"' or '\'' contains
+    a raw " or ' that would otherwise be misinterpreted as starting a string/char
+    literal, causing the regex to consume multiple lines and corrupt line numbers.
+    """
+    # Strip character literals: 'a', '\n', '\"', '\'' etc.
+    result = re.sub(r"'(?:[^'\\]|\\.)'", "''", source)
+    # Strip string literals — now safe since embedded " chars are gone
+    result = re.sub(r'"(?:[^"\\]|\\.)*"', '""', result)
+    return result
 
 
 def _extract_functions(source: str) -> List[dict]:
