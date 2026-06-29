@@ -693,11 +693,13 @@ PATTERNS: List[Dict[str, Any]] = [
     {
         "id": "RTOS-SLEEP-IN-ISR",
         "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
-        "block_scan_for": r'\b(?:k_sleep|k_msleep|k_usleep|usleep|sleep|nanosleep|k_busy_wait|vTaskDelay|osDelay)\b',
+        # k_busy_wait is a CPU spin-wait and does NOT invoke the scheduler — safe in ISR context.
+        # Only flag true scheduler-blocking sleep calls.
+        "block_scan_for": r'\b(?:k_sleep|k_msleep|k_usleep|usleep|sleep|nanosleep|vTaskDelay|osDelay)\b',
         "category": "bug", "severity": "critical",
         "title": "Blocking sleep in ISR context",
         "cwe": "CWE-662", "cert_c": None,
-        "desc": "Sleeping or busy-waiting in an ISR blocks all lower-priority interrupts and can deadlock the scheduler.",
+        "desc": "Sleeping in an ISR invokes the scheduler and can cause deadlock or priority inversion.",
         "fix": "ISRs must be non-blocking. Defer work to a thread via k_work, k_sem, or k_msgq.",
     },
     {
