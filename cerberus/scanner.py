@@ -276,7 +276,8 @@ PATTERNS: List[Dict[str, Any]] = [
     {
         "id": "MEM-MALLOC-NULL",
         "regex": r'\b(\w+)\s*=\s*(?:\([^)]*\)\s*)?malloc\s*\(',
-        "lookahead_fail": r'\bif\s*\(\s*!?\s*{var}\b|assert\s*\(\s*{var}\b|{var}\s*!=\s*NULL|NULL\s*!=\s*{var}|{var}\s*==\s*NULL',
+        # Also suppress for Zephyr's zassert_not_null(ptr, msg) — equivalent to assert(ptr != NULL).
+        "lookahead_fail": r'\bif\s*\(\s*!?\s*{var}\b|assert\s*\(\s*{var}\b|{var}\s*!=\s*NULL|NULL\s*!=\s*{var}|{var}\s*==\s*NULL|zassert_not_null\s*\(\s*{var}\b',
         "lookahead_lines": 3,
         "category": "memory", "severity": "high",
         "title": "malloc() return value not checked",
