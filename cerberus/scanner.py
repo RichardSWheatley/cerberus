@@ -376,15 +376,11 @@ PATTERNS: List[Dict[str, Any]] = [
 
     # ──────────── BUFFER / BOUNDS ────────────
 
-    {
-        "id": "BUF-READ-OVERSIZE",
-        "regex": r'(?:read|recv|recvfrom)\s*\([^,]+,\s*(\w+)\s*,\s*(\d+)\s*\)',
-        "category": "security", "severity": "critical",
-        "title": "Read size may exceed buffer capacity",
-        "cwe": "CWE-120", "cert_c": "STR31-C",
-        "desc": "A read/recv call specifies a byte count that may exceed the target buffer allocation. Stack smash on oversized input.",
-        "fix": "Use sizeof(buffer) as the length argument.",
-    },
+    # BUF-READ-OVERSIZE removed: the pattern fires on every read()/recv() with a numeric count
+    # (e.g. read(dev, buf, 1)) regardless of whether that count fits the buffer. Without
+    # buffer-size dataflow there is no way to distinguish safe from unsafe — it generates
+    # 100% false positives. A meaningful check would require knowing the declaration of `buf`.
+    # Removed rather than suppressed to avoid silent noise in every driver that calls read().
     {
         "id": "BUF-OBO-LOOP",
         "regex": r'for\s*\([^;]*;\s*\w+\s*<=\s*(\w+)\s*;',
@@ -460,7 +456,11 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "INT-SHIFT-NEGATIVE",
-        "regex": r'<<\s*-|>>\s*-',
+        # Match only literal negative integer constants as the shift amount.
+        # `>> -var` is NOT a shift by a negative value — `-var` is unary negation of an
+        # identifier, which may well be positive (e.g. `>> -log_seconds` when log_seconds < 0).
+        # Only a literal `-N` (digit after the minus sign) is a guaranteed negative shift amount.
+        "regex": r'(?:<<|>>)\s*-\s*\d',
         "category": "undefined_behavior", "severity": "critical",
         "title": "Shift by negative amount",
         "cwe": "CWE-682", "cert_c": "INT34-C",
@@ -625,7 +625,7 @@ PATTERNS: List[Dict[str, Any]] = [
 
     {
         "id": "RTOS-HEAP-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "lookahead_fail": None,
         "lookahead_lines": 0,
         "block_scan_for": r'\b(?:malloc|calloc|realloc|free|k_malloc|k_free|k_calloc)\b',
@@ -637,7 +637,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-PRINTF-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "block_scan_for": r'\b(?:printf|fprintf|puts|fputs|printk|LOG_INF|LOG_ERR|LOG_WRN|LOG_DBG|snprintf|sprintf)\b',
         "category": "bug", "severity": "high",
         "title": "Logging/printf in ISR context",
@@ -647,7 +647,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-SLEEP-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "block_scan_for": r'\b(?:k_sleep|k_msleep|k_usleep|usleep|sleep|nanosleep|k_busy_wait|vTaskDelay|osDelay)\b',
         "category": "bug", "severity": "critical",
         "title": "Blocking sleep in ISR context",
@@ -657,7 +657,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-MUTEX-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "block_scan_for": r'\b(?:k_mutex_lock|k_sem_take|pthread_mutex_lock|xSemaphoreTake|osMutexAcquire)\b',
         "category": "bug", "severity": "critical",
         "title": "Mutex/semaphore acquisition in ISR context",
@@ -667,7 +667,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-FLOAT-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "block_scan_for": r'\b(?:float|double)\s+\w+|(?:sinf?|cosf?|sqrtf?|expf?|logf?|powf?|fabs|atan2f?)\s*\(',
         "category": "bug", "severity": "high",
         "title": "Floating-point operation in ISR context",
@@ -945,7 +945,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "EMB-WATCHDOG-FEED-ISR",
-        "regex": r'(?:void\s+\w*(?:isr|irq|handler|ISR|IRQ|_isr|_irq|Interrupt)\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
         "block_scan_for": r'\b(?:wdt_feed|IWDG_ReloadCounter|WDT_Feed|HAL_IWDG_Refresh|wdt_kick)\b',
         "category": "bug", "severity": "high",
         "title": "Watchdog feed in ISR context",
