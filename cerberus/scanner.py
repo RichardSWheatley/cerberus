@@ -470,16 +470,28 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "INT-SHIFT-OVERWIDTH",
-        # Only flag shifts of >= 64 bits (UB on any C type) OR shifts of 32-63 bits on lines
-        # that do NOT contain an obvious 64-bit type keyword.
-        # `x >> 32` is valid when x is u64/uint64_t/long long — the previous pattern fired on
-        # every such shift regardless of operand width (seen extensively in Linux capability.c).
-        "regex": r'(?:<<|>>)\s*(?:6[4-9]|[7-9]\d|\d{3,})',
+        # Flag shifts of >= 128 bits (UB on all types including uint128_t).
+        # Shifts of 64-127 bits are valid on uint128_t/__uint128_t — suppress when a 128-bit
+        # type appears on the same line (NuttX crypto/ecc.c uses uint128_t >> 64 extensively).
+        # Shifts of >= 128 are UB on everything and are not suppressed.
+        "regex": r'(?:<<|>>)\s*(?:1[2-9]\d|[2-9]\d{2,}|\d{4,})',
         "category": "undefined_behavior", "severity": "critical",
-        "title": "Shift by >= 64 bits",
+        "title": "Shift by >= 128 bits",
         "cwe": "CWE-682", "cert_c": "INT34-C",
-        "desc": "Shifting by >= 64 bits is undefined behavior on all standard C integer types.",
+        "desc": "Shifting by >= 128 bits is undefined behavior on all C integer types including 128-bit extensions.",
         "fix": "Ensure shift amount is < bit width of the operand type.",
+    },
+    {
+        "id": "INT-SHIFT-OVERWIDTH-64",
+        # Shifts of 64-127 bits are UB on 64-bit types but valid on uint128_t/__int128.
+        # Suppress when a 128-bit type keyword appears on the line.
+        "regex": r'(?:<<|>>)\s*(?:6[4-9]|[7-9]\d|1[01]\d)',
+        "skip_line_pattern": r'\buint128_t\b|__uint128_t\b|__int128\b|unsigned\s+__int128\b',
+        "category": "undefined_behavior", "severity": "critical",
+        "title": "Shift by 64-127 bits on likely 64-bit operand",
+        "cwe": "CWE-682", "cert_c": "INT34-C",
+        "desc": "Shifting by 64-127 bits is undefined behavior for 64-bit types. Verify the operand is uint128_t.",
+        "fix": "Cast operand to uint128_t before shifting, or verify the type is already 128-bit.",
     },
     {
         "id": "INT-SHIFT-OVERWIDTH-32",
@@ -533,7 +545,21 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "CF-SEMI-AFTER-IF",
-        "regex": r'\b(?:if|for|while)\s*\([^)]*\)\s*;',
+        # Two previous false-positive sources fixed:
+        # 1. `[^)]*` stopped at the FIRST `)`, so for-loops with nested parens in their
+        #    condition (e.g. `for (i = 0; i < (n >> 2); i++)`) had the inner `)` consumed as
+        #    the closing paren and the condition separator `;` flagged as an empty body.
+        #    Fixed by using `[^()]*` which rejects any condition containing nested parens.
+        # 2. `do { } while (cond);` — the trailing `;` of the do-while terminator was flagged
+        #    as an empty while body. Fixed by lookbehind for `}` on the preceding line.
+        "regex": r'\b(?:if|for|while)\s*\([^()]*\)\s*;',
+        # Suppress do-while terminators:
+        #   `} while (cond);` — } immediately before while on the same line
+        #   `    }` alone on its own line — closing brace of the do-block on the line before
+        # Use `^\s*\}\s*$` (line is only `}`) rather than `\}\s*$` (any line ending with `}`)
+        # to avoid suppressing real empty-if cases on one-liner test strings.
+        "lookbehind_fail": r'^\s*\}\s*$|\}\s*while\b',
+        "lookbehind_lines": 1,
         "category": "bug", "severity": "high",
         "title": "Semicolon immediately after if/for/while",
         "cwe": "CWE-561", "cert_c": "EXP15-C", "misra": "R.15.6",
@@ -1032,11 +1058,19 @@ def scan_banned_functions(stripped: str) -> List[Finding]:
     findings = []
     counter = 0
     lines = stripped.splitlines()
+    # A function definition has a return type (word chars, *, spaces) before the name.
+    # Matches: `char *gets(`, `FAR char *gets(`, `static int sprintf(`, etc.
+    # Used to suppress false positives when a file IMPLEMENTS a banned function (e.g. libc).
+    _defn_re = re.compile(r'\b\w[\w\s\*]*\b{name}\s*\(')
 
     for func_name, info in BANNED_FUNCTIONS.items():
         pattern = re.compile(rf'\b{re.escape(func_name)}\s*\(')
+        defn_re = re.compile(rf'\b\w[\w\s\*]*\b{re.escape(func_name)}\s*\(')
         for i, line in enumerate(lines):
             if pattern.search(line):
+                # Skip function definitions — a return type appears before the function name
+                if defn_re.search(line):
+                    continue
                 counter += 1
                 findings.append(Finding(
                     id=f"S{counter:03d}",
