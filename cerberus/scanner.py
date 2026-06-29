@@ -428,6 +428,9 @@ PATTERNS: List[Dict[str, Any]] = [
     {
         "id": "FMT-PRINTF-NONLIT",
         "regex": r'\b(?:printf|fprintf|dprintf|syslog)\s*\(\s*(?!.*")\s*(\w+)\s*\)',
+        # Skip #define wrapper macros like `#define dprintf(x...) printf(x)`.
+        # These pass the format string through — not a vulnerability at the definition site.
+        "skip_line_pattern": r'^\s*#\s*define',
         "category": "security", "severity": "critical",
         "title": "Format string vulnerability",
         "cwe": "CWE-134", "cert_c": "FIO30-C",
@@ -485,7 +488,14 @@ PATTERNS: List[Dict[str, Any]] = [
         # Shifts of 64-127 bits are UB on 64-bit types but valid on uint128_t/__int128.
         # Suppress when a 128-bit type keyword appears on the line.
         "regex": r'(?:<<|>>)\s*(?:6[4-9]|[7-9]\d|1[01]\d)',
-        "skip_line_pattern": r'\buint128_t\b|__uint128_t\b|__int128\b|unsigned\s+__int128\b',
+        # Same-line suppression: 128-bit type keyword on the same line as the shift.
+        # Includes Linux kernel's `u128`/`u_max` typedefs and `GENMASK_U128` macro.
+        "skip_line_pattern": r'\buint128_t\b|__uint128_t\b|__int128\b|unsigned\s+__int128\b|\bu128\b|\bu_max\b|GENMASK_U128\b',
+        # Lookbehind suppression: any use of a 128-bit type within 25 lines above the shift.
+        # Matches both declarations (`u128 prod = ...`) and casts (`(u128)x`).
+        # Linux kernel uses `u128`/`u_max` as typedefs; NuttX uses `uint128_t`.
+        "lookbehind_fail": r'\bu128\b|\bu_max\b|\buint128_t\b|__uint128_t\b|\b__int128\b',
+        "lookbehind_lines": 25,
         "category": "undefined_behavior", "severity": "critical",
         "title": "Shift by 64-127 bits on likely 64-bit operand",
         "cwe": "CWE-682", "cert_c": "INT34-C",
