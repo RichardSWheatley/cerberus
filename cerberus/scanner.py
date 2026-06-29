@@ -1168,7 +1168,7 @@ def scan_patterns(stripped: str, filepath: str = "", functions: List[dict] = Non
                 first_line = func["body"].split('\n')[0] if func["body"] else ""
                 full_header = stripped.splitlines()[func["start_line"] - 1] if func["start_line"] <= len(lines) else ""
                 if func_re.search(full_header) or func_re.search(first_line):
-                    if target_re.search(func["body"]):
+                    if target_re.search(_strip_strings(func["body"])):
                         counter += 1
                         findings.append(Finding(
                             id=f"S{counter:03d}",
