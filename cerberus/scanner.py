@@ -362,11 +362,12 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "MEM-RETURN-STACK",
-        # Match `return &var;` but skip if `static` storage-class appears on a declaration of that
-        # variable anywhere in the file — static-storage variables outlive the function frame.
-        "regex": r'return\s*&\s*(\w+)\s*;',
-        "lookbehind_fail": r'static\s+(?:\w+\s+)*{var}\b|static\s+const\s+(?:\w+\s+)*{var}\b',
-        "lookbehind_lines": 99999,
+        # Block-scan within each function: find `return &var`, then check if `var` is declared
+        # as a non-static local variable WITHIN THE SAME FUNCTION BODY.
+        # If `var` has no local declaration (macro-declared static, global defined elsewhere, etc.)
+        # it is suppressed — only automatic-storage locals are dangerous dangling pointers.
+        "regex": None,
+        "meta_check": "return_stack_local",
         "category": "memory", "severity": "critical",
         "title": "Returning address of stack-local variable",
         "cwe": "CWE-562", "cert_c": "DCL30-C",
@@ -469,12 +470,28 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "INT-SHIFT-OVERWIDTH",
-        "regex": r'(?:<<|>>)\s*(?:3[2-9]|[4-9]\d|\d{3,})',
+        # Only flag shifts of >= 64 bits (UB on any C type) OR shifts of 32-63 bits on lines
+        # that do NOT contain an obvious 64-bit type keyword.
+        # `x >> 32` is valid when x is u64/uint64_t/long long — the previous pattern fired on
+        # every such shift regardless of operand width (seen extensively in Linux capability.c).
+        "regex": r'(?:<<|>>)\s*(?:6[4-9]|[7-9]\d|\d{3,})',
         "category": "undefined_behavior", "severity": "critical",
-        "title": "Shift by >= 32 bits",
+        "title": "Shift by >= 64 bits",
         "cwe": "CWE-682", "cert_c": "INT34-C",
-        "desc": "Shifting by >= the width of the type is undefined behavior. For 32-bit int, shifts of 32+ are UB.",
-        "fix": "Ensure shift amount is < bit width of the operand type. Use explicit 64-bit types for wider shifts.",
+        "desc": "Shifting by >= 64 bits is undefined behavior on all standard C integer types.",
+        "fix": "Ensure shift amount is < bit width of the operand type.",
+    },
+    {
+        "id": "INT-SHIFT-OVERWIDTH-32",
+        # Shifts of 32-63 bits are UB only on 32-bit types. Flag them only when the line does
+        # NOT contain a 64-bit type keyword, which would make the shift legal.
+        "regex": r'(?:<<|>>)\s*(?:3[2-9]|[45]\d|6[0-3])',
+        "skip_line_pattern": r'\bu(?:int)?64_t\b|__u64\b|unsigned\s+long\s+long\b|long\s+long\b|u64\b|s64\b|__le64\b|__be64\b',
+        "category": "undefined_behavior", "severity": "high",
+        "title": "Shift by 32-63 bits on likely 32-bit operand",
+        "cwe": "CWE-682", "cert_c": "INT34-C",
+        "desc": "Shifting by 32-63 bits is undefined behavior for 32-bit types. Verify the left operand is 64-bit.",
+        "fix": "Cast operand to uint64_t before shifting, or use explicit 64-bit types throughout.",
     },
     {
         "id": "INT-DIV-ZERO",
@@ -625,7 +642,7 @@ PATTERNS: List[Dict[str, Any]] = [
 
     {
         "id": "RTOS-HEAP-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "lookahead_fail": None,
         "lookahead_lines": 0,
         "block_scan_for": r'\b(?:malloc|calloc|realloc|free|k_malloc|k_free|k_calloc)\b',
@@ -637,7 +654,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-PRINTF-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "block_scan_for": r'\b(?:printf|fprintf|puts|fputs|printk|LOG_INF|LOG_ERR|LOG_WRN|LOG_DBG|snprintf|sprintf)\b',
         "category": "bug", "severity": "high",
         "title": "Logging/printf in ISR context",
@@ -647,7 +664,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-SLEEP-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "block_scan_for": r'\b(?:k_sleep|k_msleep|k_usleep|usleep|sleep|nanosleep|k_busy_wait|vTaskDelay|osDelay)\b',
         "category": "bug", "severity": "critical",
         "title": "Blocking sleep in ISR context",
@@ -657,7 +674,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-MUTEX-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "block_scan_for": r'\b(?:k_mutex_lock|k_sem_take|pthread_mutex_lock|xSemaphoreTake|osMutexAcquire)\b',
         "category": "bug", "severity": "critical",
         "title": "Mutex/semaphore acquisition in ISR context",
@@ -667,7 +684,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "RTOS-FLOAT-IN-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "block_scan_for": r'\b(?:float|double)\s+\w+|(?:sinf?|cosf?|sqrtf?|expf?|logf?|powf?|fabs|atan2f?)\s*\(',
         "category": "bug", "severity": "high",
         "title": "Floating-point operation in ISR context",
@@ -945,7 +962,7 @@ PATTERNS: List[Dict[str, Any]] = [
     },
     {
         "id": "EMB-WATCHDOG-FEED-ISR",
-        "regex": r'(?:void\s+\w*(?:_isr|_irq|ISR|IRQ|Interrupt)\w*\s*\(|void\s+ISR\w*\s*\()',
+        "regex": r'(?:void\s+\w*(?:_isr|_irq)\s*\(|void\s+(?:ISR|IRQ|Interrupt)\w*\s*\()',
         "block_scan_for": r'\b(?:wdt_feed|IWDG_ReloadCounter|WDT_Feed|HAL_IWDG_Refresh|wdt_kick)\b',
         "category": "bug", "severity": "high",
         "title": "Watchdog feed in ISR context",
@@ -1144,7 +1161,7 @@ def scan_patterns(stripped: str, filepath: str = "", functions: List[dict] = Non
             # Lookahead check
             if "lookahead_fail" in rule and rule["lookahead_fail"]:
                 var = match.group(1) if match.lastindex and match.lastindex >= 1 else ""
-                guard_re = re.compile(rule["lookahead_fail"].replace("{var}", re.escape(var)))
+                guard_re = re.compile(rule["lookahead_fail"].replace("{var}", re.escape(var)), re.MULTILINE)
                 n = rule.get("lookahead_lines", 3)
                 window = "\n".join(lines[i:i + n + 1])
                 if guard_re.search(window):
@@ -1153,7 +1170,7 @@ def scan_patterns(stripped: str, filepath: str = "", functions: List[dict] = Non
             # Lookbehind check
             if "lookbehind_fail" in rule and rule["lookbehind_fail"]:
                 var = match.group(1) if match.lastindex and match.lastindex >= 1 else ""
-                guard_re = re.compile(rule["lookbehind_fail"].replace("{var}", re.escape(var)))
+                guard_re = re.compile(rule["lookbehind_fail"].replace("{var}", re.escape(var)), re.MULTILINE)
                 n = rule.get("lookbehind_lines", 3)
                 window = "\n".join(lines[max(0, i - n):i + 1])
                 if guard_re.search(window):
@@ -1178,9 +1195,16 @@ def scan_patterns(stripped: str, filepath: str = "", functions: List[dict] = Non
 
 
 def scan_meta(functions: List[dict]) -> List[Finding]:
-    """Run meta-level checks (function length, etc.)."""
+    """Run meta-level checks (function length, stack-local return, etc.)."""
     findings = []
     counter = 400
+
+    # Pre-compile patterns used in block checks
+    _return_addr_re = re.compile(r'return\s*&\s*(\w+)\s*;')
+    # A local declaration: indented (whitespace at start), type keyword, variable name.
+    # Does NOT start with `static` (static locals are safe). Also matches function params
+    # declared in the body via assignments — this is conservative.
+    _local_decl_re_tpl = r'(?:^|\n)\s+(?!static\b)(?:const\s+)?(?:\w+\s+)+\*?\s*{var}\s*[=;,\[]'
 
     for rule in PATTERNS:
         if not rule.get("meta_check"):
@@ -1199,6 +1223,33 @@ def scan_meta(functions: List[dict]) -> List[Finding]:
                         title=f"{rule['title']}: {func['name']}() is {length} lines",
                         location=f"{func['name']}()",
                         line=func["start_line"],
+                        description=rule["desc"],
+                        cwe=rule.get("cwe"),
+                        cert_c=rule.get("cert_c"),
+                        recommendation=rule["fix"],
+                    ))
+
+        elif rule["meta_check"] == "return_stack_local":
+            for func in functions:
+                body = func["body"]
+                body_lines = body.split('\n')
+                for m in _return_addr_re.finditer(body):
+                    var = m.group(1)
+                    # Calculate absolute line number
+                    abs_line = func["start_line"] + body[:m.start()].count('\n')
+                    # Check if `var` has a non-static local declaration inside this function body.
+                    # If it does NOT appear as a local, it is a global/static — suppress.
+                    local_re = re.compile(_local_decl_re_tpl.replace("{var}", re.escape(var)), re.MULTILINE)
+                    if not local_re.search(body):
+                        continue  # not a local — global/static/extern, safe to return its address
+                    counter += 1
+                    findings.append(Finding(
+                        id=f"S{counter:03d}",
+                        category=rule["category"],
+                        severity=rule["severity"],
+                        title=rule["title"],
+                        location=f"{func['name']}()",
+                        line=abs_line,
                         description=rule["desc"],
                         cwe=rule.get("cwe"),
                         cert_c=rule.get("cert_c"),
